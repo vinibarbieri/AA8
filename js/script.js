@@ -77,10 +77,22 @@ function ocultarElementos() {
     document.getElementById('login-body').style.display = 'none';
     document.getElementById('nova-conta').style.display = 'none';
     document.getElementById('divHome').style.display = 'block';
+    document.getElementById('divLocalidadesIBGE').style.display = 'none';
+}
+
+// Função para mostrar apenas IBGE (após login bem-sucedido)
+function mostrarApenasIBGE() {
+    document.getElementById('login-body').style.display = 'none';
+    document.getElementById('nova-conta').style.display = 'none';
+    document.getElementById('divHome').style.display = 'block';
+    document.getElementById('divLocalidadesIBGE').style.display = 'block';
 }
 
 // Função para mostrar apenas a home
 function mostrarApenasHome() {
+    // Remover login ao voltar para home
+    localStorage.removeItem('usuarioLogado');
+    localStorage.removeItem('emailLogado');
     ocultarElementos();
 }
 
@@ -119,7 +131,7 @@ function resetarFormularioConta() {
     form.reset();
     
     // Limpar todas as mensagens de status
-    const statusElements = ['statusNome', 'statusSobrenome', 'statusCPF', 'statusEmail', 'statusSenha', 'statusRepitaSenha'];
+    const statusElements = ['statusNome', 'statusSobrenome', 'statusCPF', 'statusEmail', 'statusSenha', 'statusRepitaSenha', 'statusCEP'];
     statusElements.forEach(id => {
         const element = document.getElementById(id);
         element.textContent = '';
@@ -269,6 +281,52 @@ function atualizarBotaoCriarConta() {
     console.log('Atualizando botão criar conta. Válidos:', todosValidos, 'Botão habilitado:', !botao.disabled);
 }
 
+// Função para buscar endereço via CEP
+async function buscarEnderecoViaCEP() {
+    const cepInput = document.getElementById('campoCEP');
+    const cep = cepInput.value.replace(/\D/g, ''); // Remove caracteres não numéricos
+    const statusCEP = document.getElementById('statusCEP');
+    
+    // Limpar campos de endereço
+    document.getElementById('logradouro').value = '';
+    document.getElementById('bairro').value = '';
+    document.getElementById('cidade').value = '';
+    document.getElementById('estado').value = '';
+    
+    // Verificar se o CEP tem 8 dígitos
+    if (cep.length !== 8) {
+        statusCEP.textContent = 'CEP deve conter 8 dígitos';
+        statusCEP.className = 'status-fail';
+        return;
+    }
+    
+    try {
+        const url = `https://viacep.com.br/ws/${cep}/json/`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.erro) {
+            statusCEP.textContent = 'CEP não encontrado';
+            statusCEP.className = 'status-fail';
+            return;
+        }
+        
+        // Preencher campos de endereço
+        document.getElementById('logradouro').value = data.logradouro || '';
+        document.getElementById('bairro').value = data.bairro || '';
+        document.getElementById('cidade').value = data.localidade || '';
+        document.getElementById('estado').value = data.uf || '';
+        
+        statusCEP.textContent = '✓';
+        statusCEP.className = 'status-ok';
+        
+    } catch (error) {
+        console.error('Erro ao buscar CEP:', error);
+        statusCEP.textContent = 'Erro ao buscar CEP';
+        statusCEP.className = 'status-fail';
+    }
+}
+
 // Função para criar conta
 function criarConta() {
     if (!verificarCamposValidos()) {
@@ -282,6 +340,7 @@ function criarConta() {
     const cpfInput = document.getElementById('campoCPF');
     const emailInput = document.getElementById('campoEmail');
     const senhaInput = document.getElementById('campoSenha');
+    const cepInput = document.getElementById('campoCEP');
     
     // Verificar se todos os elementos foram encontrados
     if (!nomeInput || !sobrenomeInput || !cpfInput || !emailInput || !senhaInput) {
@@ -301,17 +360,38 @@ function criarConta() {
     const cpfValor = cpfInput.value.trim();
     const email = emailInput.value.trim();
     const senha = senhaInput.value;
+    const cep = cepInput ? cepInput.value.trim() : '';
+    const logradouro = document.getElementById('logradouro').value.trim();
+    const bairro = document.getElementById('bairro').value.trim();
+    const cidade = document.getElementById('cidade').value.trim();
+    const estado = document.getElementById('estado').value.trim();
     
     try {
         const cpf = new CPF(cpfValor);
         const conta = new Conta(nome, sobrenome, cpf, email, senha);
         
-        console.log(conta.toString());
-        alert('Conta criada com sucesso! Verifique o console para mais detalhes.');
+        // Adicionar dados de endereço ao objeto
+        conta.endereco = {
+            cep: cep,
+            logradouro: logradouro,
+            bairro: bairro,
+            cidade: cidade,
+            estado: estado
+        };
         
-        // Resetar formulário após criação
-        resetarFormularioConta();
-        mostrarApenasHome();
+        // Salvar no localStorage
+        localStorage.setItem('usuarioCadastrado', JSON.stringify({
+            email: email,
+            senha: senha,
+            conta: conta
+        }));
+        
+        console.log(conta.toString());
+        alert('Cadastro realizado com sucesso!');
+        
+        // Redirecionar para login
+        mostrarApenasLogin();
+        
     } catch (error) {
         alert('Erro ao criar conta: ' + error.message);
     }
@@ -345,15 +425,45 @@ function fazerLogin() {
         return;
     }
     
-    alert('Login realizado com sucesso!');
-    mostrarApenasHome();
+    // Verificar localStorage
+    const usuarioSalvo = localStorage.getItem('usuarioCadastrado');
+    
+    if (!usuarioSalvo) {
+        alert('Usuário não encontrado. Por favor, crie uma conta.');
+        return;
+    }
+    
+    try {
+        const usuario = JSON.parse(usuarioSalvo);
+        
+        if (usuario.email === email && usuario.senha === senha) {
+            // Salvar estado de login
+            localStorage.setItem('usuarioLogado', 'true');
+            localStorage.setItem('emailLogado', email);
+            
+            alert('Login realizado com sucesso!');
+            mostrarApenasIBGE();
+        } else {
+            alert('E-mail ou senha incorretos.');
+        }
+    } catch (error) {
+        console.error('Erro ao fazer login:', error);
+        alert('Erro ao fazer login');
+    }
 }
 
 // Inicialização da página
 document.addEventListener('DOMContentLoaded', function() {
     
-    // Ocultar formulários ao carregar a página
-    ocultarElementos();
+    // Verificar se o usuário já está logado
+    const usuarioLogado = localStorage.getItem('usuarioLogado');
+    if (usuarioLogado === 'true') {
+        // Mostrar página principal com IBGE
+        mostrarApenasIBGE();
+    } else {
+        // Ocultar formulários ao carregar a página
+        ocultarElementos();
+    }
     
     // Adicionar event listeners para validação em tempo real do login
     const emailLogin = document.querySelector('#login-body input[type="text"]');
